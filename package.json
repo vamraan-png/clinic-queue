@@ -1,0 +1,13 @@
+{
+  "name": "clinic-queue",
+  "private": true,
+  "workspaces": ["server", "client"],
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "dev": "npm -w server run dev & npm -w client run dev",
+    "build": "npm -w client run build",
+    "start": "npm -w server run start"
+  }
+}
