@@ -275,10 +275,23 @@ const createReceptionSchema = z.object({
 });
 
 function generateTempPassword() {
-  // simple strong-ish temp password; user must change on first login
   return `Tmp#${nanoid(10)}`;
 }
 
+// List all users
+router.get(
+  "/users",
+  requireRole("OWNER"),
+  asyncHandler(async (req, res) => {
+    const users = await User.find()
+      .select("_id name email role isActive mustChangePassword createdAt")
+      .sort({ createdAt: -1 });
+
+    res.json({ users });
+  })
+);
+
+// Create RECEPTION user (returns temp password once)
 router.post(
   "/users/reception",
   requireRole("OWNER"),
@@ -297,10 +310,10 @@ router.post(
       email,
       passwordHash: await User.hashPassword(tempPassword),
       role: "RECEPTION",
-      mustChangePassword: true
+      mustChangePassword: true,
+      isActive: true
     });
 
-    // show temp password only once (owner must copy and share securely)
     res.status(201).json({
       user: { id: user._id, name: user.name, email: user.email, role: user.role, isActive: user.isActive },
       tempPassword
@@ -308,6 +321,7 @@ router.post(
   })
 );
 
+// Enable/disable user
 router.patch(
   "/users/:userId",
   requireRole("OWNER"),
