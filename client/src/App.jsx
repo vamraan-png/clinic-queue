@@ -3,13 +3,15 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { apiFetch } from "./api/http";
 
 import LoginPage from "./pages/LoginPage";
-import AdminHome from "./pages/AdminHome";
 import DoctorQueuePage from "./pages/DoctorQueuePage";
 import TokenStatusPage from "./pages/TokenStatusPage";
+import DisplayScreenPage from "./pages/DisplayScreenPage";
+
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminLayout from "./components/AdminLayout";
+import DoctorsPage from "./pages/DoctorsPage";
 import UsersPage from "./pages/UsersPage";
-import DisplayScreenPage from "./pages/DisplayScreenPage";
+import RequireOwner from "./components/RequireOwner";
 
 export default function App() {
   const [user, setUser] = useState(undefined);
@@ -26,32 +28,35 @@ export default function App() {
 
       <Route path="/login" element={<LoginPage onLogin={setUser} />} />
 
-      <Route
-  path="/admin"
-  element={
-    <ProtectedRoute user={user}>
-      <AdminLayout user={user} onLogout={() => setUser(null)} />
-    </ProtectedRoute>
-  }
->
-  <Route index element={<AdminHome user={user} onLogout={() => setUser(null)} />} />
-  <Route path="doctors/:doctorId" element={<DoctorQueuePage />} />
-
-  {/* OWNER only link is shown in UI; backend still enforces security */}
-  <Route path="users" element={<UsersPage />} />
-</Route>
-
-      <Route
-        path="/admin/doctors/:doctorId"
-        element={
-          <ProtectedRoute user={user}>
-            <DoctorQueuePage />
-          </ProtectedRoute>
-        }
-      />
-
+      {/* Public pages */}
       <Route path="/t/:publicId" element={<TokenStatusPage />} />
       <Route path="/display" element={<DisplayScreenPage />} />
+
+      {/* Admin area */}
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute user={user}>
+            <AdminLayout user={user} onLogout={() => setUser(null)} />
+          </ProtectedRoute>
+        }
+      >
+        {/* /admin */}
+        <Route index element={<DoctorsPage user={user} />} />
+
+        {/* /admin/doctors/:doctorId */}
+        <Route path="doctors/:doctorId" element={<DoctorQueuePage />} />
+
+        {/* /admin/users (OWNER only) */}
+        <Route
+          path="users"
+          element={
+            <RequireOwner user={user}>
+              <UsersPage />
+            </RequireOwner>
+          }
+        />
+      </Route>
 
       <Route path="*" element={<div style={{ padding: 18 }}>Not Found</div>} />
     </Routes>
