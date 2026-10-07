@@ -1,7 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link as RouterLink } from "react-router-dom";
 import { apiFetch } from "../api/http";
 import { displayToken } from "../api/format";
+
+import Box from "@mui/material/Box";
+import Paper from "@mui/material/Paper";
+import Typography from "@mui/material/Typography";
+import Button from "@mui/material/Button";
+import Stack from "@mui/material/Stack";
+import Divider from "@mui/material/Divider";
+import TextField from "@mui/material/TextField";
+import Alert from "@mui/material/Alert";
+import Chip from "@mui/material/Chip";
+import Table from "@mui/material/Table";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import TableCell from "@mui/material/TableCell";
+import TableBody from "@mui/material/TableBody";
+import Snackbar from "@mui/material/Snackbar";
 
 export default function DoctorQueuePage() {
   const { doctorId } = useParams();
@@ -12,48 +28,107 @@ export default function DoctorQueuePage() {
 
   const [patientName, setPatientName] = useState("");
   const [patientPhone, setPatientPhone] = useState("");
-  const [createdInfo, setCreatedInfo] = useState(null);
 
-  const [error, setError] = useState("");
+  const [filter, setFilter] = useState("ALL");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [live, setLive] = useState(false);
+
+  const [snack, setSnack] = useState({
+    open: false,
+    message: "",
+  });
 
   const calledToken = useMemo(
     () => tokens.find((t) => t.status === "CALLED") || null,
     [tokens]
   );
 
-  async function loadQueue() {
-    setError("");
+  const filteredTokens = useMemo(() => {
+    if (filter === "ALL") return tokens;
+    return tokens.filter((t) => t.status === filter);
+  }, [tokens, filter]);
+
+  async function loadQueueOnce() {
     const data = await apiFetch(`/api/admin/doctors/${doctorId}/queue`);
+
     setDoctor(data.doctor);
     setDateKey(data.dateKey);
     setTokens(data.tokens);
   }
 
   useEffect(() => {
-    loadQueue().catch((e) => setError(e.message));
+    setError("");
+    setLive(false);
+
+    // Initial load
+    loadQueueOnce().catch((e) => setError(e.message));
+
+    // Live stream
+    const es = new EventSource(
+      `/api/admin/doctors/${doctorId}/queue/stream`
+    );
+
+    es.addEventListener("queue", (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        setDoctor(data.doctor);
+        setDateKey(data.dateKey);
+        setTokens(data.tokens);
+        setLive(true);
+        setError("");
+      } catch (e) {
+        setError("Failed to update queue.");
+      }
+    });
+
+    es.addEventListener("error", () => {
+      // EventSource auto-retries
+      setLive(false);
+    });
+
+    return () => es.close();
   }, [doctorId]);
 
   async function createToken(e) {
     e.preventDefault();
+
     setBusy(true);
     setError("");
-    setCreatedInfo(null);
+
     try {
-      const data = await apiFetch(`/api/admin/doctors/${doctorId}/tokens`, {
-        method: "POST",
-        body: JSON.stringify({
-          patientName,
-          patientPhone: patientPhone || undefined
-        })
+      const data = await apiFetch(
+        `/api/admin/doctors/${doctorId}/tokens`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            patientName,
+            patientPhone: patientPhone || undefined,
+          }),
+        }
+      );
+
+      const link = `${window.location.origin}/t/${data.token.publicId}`;
+
+      setSnack({
+        open: true,
+        message: `Token created: ${data.token.displayToken} | Link copied`,
       });
 
-      setCreatedInfo(data.token);
+      try {
+        await navigator.clipboard.writeText(link);
+      } catch {
+        // Ignore clipboard errors
+      }
+
       setPatientName("");
       setPatientPhone("");
-      await loadQueue();
-    } catch (e2) {
-      setError(e2.message);
+
+      // Immediately update this screen too.
+      await loadQueueOnce();
+    } catch (e) {
+      setError(e.message);
     } finally {
       setBusy(false);
     }
@@ -62,9 +137,17 @@ export default function DoctorQueuePage() {
   async function callNext() {
     setBusy(true);
     setError("");
+
     try {
-      await apiFetch(`/api/admin/doctors/${doctorId}/call-next`, { method: "POST" });
-      await loadQueue();
+      await apiFetch(
+        `/api/admin/doctors/${doctorId}/call-next`,
+        {
+          method: "POST",
+        }
+      );
+
+      // Immediately update this screen.
+      await loadQueueOnce();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -75,9 +158,23 @@ export default function DoctorQueuePage() {
   async function actionToken(tokenId, action) {
     setBusy(true);
     setError("");
+
     try {
-      await apiFetch(`/api/admin/tokens/${tokenId}/${action}`, { method: "POST" });
-      await loadQueue();
+      await apiFetch(
+        `/api/admin/tokens/${tokenId}/${action}`,
+        {
+          method: "POST",
+        }
+      );
+
+      /*
+       * IMPORTANT:
+       * After Served / Skip / Cancel, immediately reload the queue.
+       *
+       * This fixes the problem where the screen still shows
+       * the old CALLED token until the page is manually refreshed.
+       */
+      await loadQueueOnce();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -87,127 +184,338 @@ export default function DoctorQueuePage() {
 
   if (!doctor) {
     return (
-      <div style={{ maxWidth: 900, margin: "28px auto", padding: 16 }}>
-        <Link to="/admin">← Back</Link>
-        <div style={{ marginTop: 12 }}>Loading...</div>
-        {error ? <div style={{ color: "crimson" }}>{error}</div> : null}
-      </div>
+      <Paper sx={{ p: 3 }}>
+        <Typography fontWeight={800}>
+          Loading queue…
+        </Typography>
+
+        {error ? (
+          <Alert sx={{ mt: 2 }} severity="error">
+            {error}
+          </Alert>
+        ) : null}
+      </Paper>
     );
   }
 
   return (
-    <div style={{ maxWidth: 900, margin: "28px auto", padding: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <Link to="/admin">← Back</Link>
-          <h2 style={{ margin: "10px 0 4px" }}>{doctor.name} Queue</h2>
-          <div style={{ color: "#555" }}>
-            Date: {dateKey} | Code: {doctor.code}
-          </div>
-        </div>
+    <Box sx={{ display: "grid", gap: 2 }}>
+      <Stack
+        direction="row"
+        justifyContent="space-between"
+        alignItems="flex-start"
+        gap={2}
+      >
+        <Box>
+          <Button
+            component={RouterLink}
+            to="/admin"
+            variant="text"
+          >
+            ← Back to Doctors
+          </Button>
 
-        <button disabled={busy} onClick={callNext} style={{ padding: 10 }}>
+          <Typography
+            variant="h5"
+            fontWeight={900}
+            sx={{ mt: 1 }}
+          >
+            {doctor.name}
+          </Typography>
+
+          <Typography sx={{ color: "text.secondary" }}>
+            Date: {dateKey} • Code: {doctor.code} •{" "}
+            <strong
+              style={{
+                color: live ? "#166534" : "#92400e",
+              }}
+            >
+              {live ? "LIVE" : "RECONNECTING"}
+            </strong>
+          </Typography>
+        </Box>
+
+        <Button
+          variant="contained"
+          onClick={callNext}
+          disabled={busy}
+        >
           Call Next
-        </button>
-      </div>
+        </Button>
+      </Stack>
 
-      {error ? <div style={{ color: "crimson", marginTop: 10 }}>{error}</div> : null}
-
-      <hr style={{ margin: "18px 0" }} />
-
-      <h3>Create Token</h3>
-      <form onSubmit={createToken} style={{ display: "grid", gap: 10, maxWidth: 520 }}>
-        <label>
-          Patient Name
-          <input
-            value={patientName}
-            onChange={(e) => setPatientName(e.target.value)}
-            required
-            style={{ width: "100%", padding: 10, marginTop: 6 }}
-          />
-        </label>
-
-        <label>
-          Phone (optional for SMS)
-          <input
-            value={patientPhone}
-            onChange={(e) => setPatientPhone(e.target.value)}
-            placeholder="+9198xxxxxx"
-            style={{ width: "100%", padding: 10, marginTop: 6 }}
-          />
-        </label>
-
-        <button disabled={busy} style={{ padding: 10 }}>
-          {busy ? "Creating..." : "Create Token"}
-        </button>
-      </form>
-
-      {createdInfo ? (
-        <div style={{ marginTop: 12, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-          <div style={{ fontWeight: 700 }}>
-            Token Created: {displayToken(createdInfo.doctor.code, createdInfo.tokenNumber)}
-          </div>
-          <div style={{ marginTop: 6 }}>
-            Patient tracking link:{" "}
-            <a href={`/t/${createdInfo.publicId}`} target="_blank" rel="noreferrer">
-              /t/{createdInfo.publicId}
-            </a>
-          </div>
-        </div>
+      {error ? (
+        <Alert severity="error">
+          {error}
+        </Alert>
       ) : null}
 
-      <hr style={{ margin: "18px 0" }} />
+      <Paper sx={{ p: 2 }}>
+        <Typography variant="h6" fontWeight={800}>
+          Now Serving
+        </Typography>
 
-      <h3>Currently Called</h3>
-      {calledToken ? (
-        <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-          <div style={{ fontWeight: 700 }}>
-            {displayToken(doctor.code, calledToken.tokenNumber)} — {calledToken.patientName}
-          </div>
-          <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
-            <button disabled={busy} onClick={() => actionToken(calledToken._id, "serve")}>
-              Mark Served
-            </button>
-            <button disabled={busy} onClick={() => actionToken(calledToken._id, "skip")}>
-              Skip
-            </button>
-            <button disabled={busy} onClick={() => actionToken(calledToken._id, "cancel")}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div style={{ color: "#555" }}>No token is currently called.</div>
-      )}
+        <Divider sx={{ my: 1.5 }} />
 
-      <hr style={{ margin: "18px 0" }} />
+        {calledToken ? (
+          <Stack
+            direction={{
+              xs: "column",
+              sm: "row",
+            }}
+            justifyContent="space-between"
+            alignItems={{
+              xs: "flex-start",
+              sm: "center",
+            }}
+            gap={2}
+          >
+            <Box>
+              <Typography
+                variant="h4"
+                fontWeight={900}
+              >
+                {displayToken(
+                  doctor.code,
+                  calledToken.tokenNumber
+                )}
+              </Typography>
 
-      <h3>All Tokens</h3>
-      <div style={{ display: "grid", gap: 8 }}>
-        {tokens.map((t) => (
-          <div
-            key={t._id}
-            style={{
-              border: "1px solid #eee",
-              borderRadius: 8,
-              padding: 10,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center"
+              <Typography
+                sx={{
+                  color: "text.secondary",
+                }}
+              >
+                {calledToken.patientName}
+              </Typography>
+            </Box>
+
+            <Stack direction="row" gap={1}>
+              <Button
+                variant="contained"
+                color="success"
+                disabled={busy}
+                onClick={() =>
+                  actionToken(
+                    calledToken._id,
+                    "serve"
+                  )
+                }
+              >
+                Served
+              </Button>
+
+              <Button
+                variant="outlined"
+                disabled={busy}
+                onClick={() =>
+                  actionToken(
+                    calledToken._id,
+                    "skip"
+                  )
+                }
+              >
+                Skip
+              </Button>
+
+              <Button
+                variant="outlined"
+                color="error"
+                disabled={busy}
+                onClick={() =>
+                  actionToken(
+                    calledToken._id,
+                    "cancel"
+                  )
+                }
+              >
+                Cancel
+              </Button>
+            </Stack>
+          </Stack>
+        ) : (
+          <Typography
+            sx={{
+              color: "text.secondary",
             }}
           >
-            <div>
-              <div style={{ fontWeight: 600 }}>
-                {displayToken(doctor.code, t.tokenNumber)} — {t.patientName}
-              </div>
-              <div style={{ color: "#555" }}>Status: {t.status}</div>
-            </div>
-            <a href={`/t/${t.publicId}`} target="_blank" rel="noreferrer">
-              Track
-            </a>
-          </div>
-        ))}
-      </div>
-    </div>
+            No token is currently called.
+          </Typography>
+        )}
+      </Paper>
+
+      <Paper sx={{ p: 2 }}>
+        <Typography variant="h6" fontWeight={800}>
+          Create Token
+        </Typography>
+
+        <Divider sx={{ my: 1.5 }} />
+
+        <Box
+          component="form"
+          onSubmit={createToken}
+          sx={{
+            display: "grid",
+            gap: 2,
+            maxWidth: 520,
+          }}
+        >
+          <TextField
+            label="Patient Name"
+            value={patientName}
+            onChange={(e) =>
+              setPatientName(e.target.value)
+            }
+            required
+          />
+
+          <TextField
+            label="Phone (optional for SMS later)"
+            value={patientPhone}
+            onChange={(e) =>
+              setPatientPhone(e.target.value)
+            }
+            placeholder="+9198xxxxxx"
+          />
+
+          <Button
+            type="submit"
+            variant="contained"
+            disabled={busy || !patientName}
+          >
+            Create Token
+          </Button>
+        </Box>
+      </Paper>
+
+      <Paper sx={{ p: 2 }}>
+        <Stack
+          direction="row"
+          justifyContent="space-between"
+          alignItems="baseline"
+        >
+          <Typography
+            variant="h6"
+            fontWeight={800}
+          >
+            Tokens
+          </Typography>
+
+          <Stack
+            direction="row"
+            gap={1}
+            flexWrap="wrap"
+          >
+            {[
+              "ALL",
+              "WAITING",
+              "CALLED",
+              "SERVED",
+              "SKIPPED",
+              "CANCELLED",
+            ].map((s) => (
+              <Chip
+                key={s}
+                label={s}
+                clickable
+                color={
+                  filter === s
+                    ? "primary"
+                    : "default"
+                }
+                variant={
+                  filter === s
+                    ? "filled"
+                    : "outlined"
+                }
+                onClick={() => setFilter(s)}
+                size="small"
+              />
+            ))}
+          </Stack>
+        </Stack>
+
+        <Divider sx={{ my: 1.5 }} />
+
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Token</TableCell>
+              <TableCell>Patient</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell align="right">
+                Track
+              </TableCell>
+            </TableRow>
+          </TableHead>
+
+          <TableBody>
+            {filteredTokens.map((t) => (
+              <TableRow
+                key={t._id}
+                hover
+              >
+                <TableCell
+                  sx={{
+                    fontWeight: 800,
+                  }}
+                >
+                  {displayToken(
+                    doctor.code,
+                    t.tokenNumber
+                  )}
+                </TableCell>
+
+                <TableCell>
+                  {t.patientName}
+                </TableCell>
+
+                <TableCell>
+                  {t.status}
+                </TableCell>
+
+                <TableCell align="right">
+                  <Button
+                    component="a"
+                    href={`/t/${t.publicId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    size="small"
+                    variant="outlined"
+                  >
+                    Open
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+
+            {!filteredTokens.length ? (
+              <TableRow>
+                <TableCell
+                  colSpan={4}
+                  sx={{
+                    color: "text.secondary",
+                  }}
+                >
+                  No tokens in this filter.
+                </TableCell>
+              </TableRow>
+            ) : null}
+          </TableBody>
+        </Table>
+      </Paper>
+
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={2200}
+        onClose={() =>
+          setSnack({
+            open: false,
+            message: "",
+          })
+        }
+        message={snack.message}
+      />
+    </Box>
   );
 }
