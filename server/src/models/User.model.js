@@ -10,7 +10,9 @@ const userSchema = new mongoose.Schema(
     passwordHash: { type: String, required: true },
     role: { type: String, enum: ROLES, required: true },
     isActive: { type: Boolean, default: true },
-    mustChangePassword: { type: Boolean, default: false }
+    phone: { type: String, trim: true, maxlength: 20 },
+mustChangePassword: { type: Boolean, default: false }
+    
   },
   { timestamps: true }
 );
@@ -23,7 +25,7 @@ userSchema.statics.hashPassword = async function (password) {
   const salt = await bcrypt.genSalt(12);
   return bcrypt.hash(password, salt);
 };
-
+userSchema.index({ phone: 1 }, { unique: true, sparse: true });
 const User = mongoose.model("User", userSchema);
 
 module.exports = { User, ROLES };
