@@ -9,6 +9,9 @@ const { Doctor } = require("../models/Doctor.model");
 const { Counter } = require("../models/Counter.model");
 const { Token } = require("../models/Token.model");
 const { getDateKey } = require("../lib/dateKey");
+const { User } = require("../models/User.model");
+const { events } = require("../lib/events");
+const mongoose = require("mongoose");
 
 const router = express.Router();
 
@@ -112,6 +115,8 @@ router.post(
       createdBy: req.user._id
     });
 
+    events.emit("display:updated");
+
     res.status(201).json({
       token: {
         id: token._id,
@@ -152,49 +157,58 @@ router.post(
 
     const dateKey = getDateKey();
 
-    const alreadyCalled = await Token.findOne({
-      doctorId: doctor._id,
-      dateKey,
-      status: "CALLED"
-    }).sort({ tokenNumber: 1 });
+    const session = await mongoose.startSession();
 
-    if (alreadyCalled) {
-      return res.json({
-        token: alreadyCalled,
-        displayToken: formatDisplayToken(doctor.code, alreadyCalled.tokenNumber),
-        alreadyCalled: true
+    try {
+      let resultPayload = null;
+
+      await session.withTransaction(async () => {
+        const alreadyCalled = await Token.findOne({
+          doctorId: doctor._id,
+          dateKey,
+          status: "CALLED"
+        })
+          .sort({ tokenNumber: 1 })
+          .session(session);
+
+        if (alreadyCalled) {
+          resultPayload = {
+            token: alreadyCalled,
+            displayToken: formatDisplayToken(doctor.code, alreadyCalled.tokenNumber),
+            alreadyCalled: true
+          };
+          return;
+        }
+
+        const nextToken = await Token.findOneAndUpdate(
+          {
+            doctorId: doctor._id,
+            dateKey,
+            status: "WAITING"
+          },
+          { $set: { status: "CALLED", calledAt: new Date() } },
+          { sort: { tokenNumber: 1 }, new: true, session }
+        );
+
+        if (!nextToken) throw new HttpError(404, "No waiting tokens");
+
+        resultPayload = {
+          token: nextToken,
+          displayToken: formatDisplayToken(doctor.code, nextToken.tokenNumber),
+          alreadyCalled: false
+        };
       });
+
+      // Emit events OUTSIDE transaction (better behavior)
+      if (resultPayload?.token?.publicId) {
+        events.emit(`token:${resultPayload.token.publicId}:updated`);
+      }
+      events.emit("display:updated");
+
+      res.json(resultPayload);
+    } finally {
+      session.endSession();
     }
-
-    const nextToken = await Token.findOne({
-      doctorId: doctor._id,
-      dateKey,
-      status: "WAITING"
-    }).sort({ tokenNumber: 1 });
-
-    if (!nextToken) throw new HttpError(404, "No waiting tokens");
-
-    nextToken.status = "CALLED";
-nextToken.calledAt = new Date();
-await nextToken.save();
-
-// notify realtime listeners
-events.emit(`token:${nextToken.publicId}:updated`);
-
-// optional SMS
-const appUrl = process.env.APP_URL; // set this in Render and .env
-if (appUrl && nextToken.patientPhone) {
-  const link = `${appUrl}/t/${nextToken.publicId}`;
-  const msg = `Your token ${doctor.code}-${String(nextToken.tokenNumber).padStart(3, "0")} for ${doctor.name} is now CALLED. Track: ${link}`;
-  // do not crash if SMS fails
-  sendSms(nextToken.patientPhone, msg).catch(() => {});
-}
-
-    res.json({
-      token: nextToken,
-      displayToken: formatDisplayToken(doctor.code, nextToken.tokenNumber),
-      alreadyCalled: false
-    });
   })
 );
 
@@ -210,6 +224,7 @@ async function updateTokenStatusOrFail(tokenId, allowedFromStatuses, newStatus, 
   token[timeField] = new Date();
   await token.save();
   events.emit(`token:${token.publicId}:updated`);
+  events.emit("display:updated");
   return token;
 }
 
@@ -242,6 +257,73 @@ router.post(
       "cancelledAt"
     );
     res.json({ token });
+  })
+);
+
+router.get(
+  "/users",
+  requireRole("OWNER"),
+  asyncHandler(async (req, res) => {
+    const users = await User.find().select("_id name email role isActive mustChangePassword createdAt").sort({ createdAt: -1 });
+    res.json({ users });
+  })
+);
+
+const createReceptionSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  email: z.string().email().max(120)
+});
+
+function generateTempPassword() {
+  // simple strong-ish temp password; user must change on first login
+  return `Tmp#${nanoid(10)}`;
+}
+
+router.post(
+  "/users/reception",
+  requireRole("OWNER"),
+  asyncHandler(async (req, res) => {
+    const parsed = createReceptionSchema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, "Invalid user data");
+
+    const email = parsed.data.email.toLowerCase();
+    const exists = await User.findOne({ email });
+    if (exists) throw new HttpError(409, "Email already exists");
+
+    const tempPassword = generateTempPassword();
+
+    const user = await User.create({
+      name: parsed.data.name,
+      email,
+      passwordHash: await User.hashPassword(tempPassword),
+      role: "RECEPTION",
+      mustChangePassword: true
+    });
+
+    // show temp password only once (owner must copy and share securely)
+    res.status(201).json({
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, isActive: user.isActive },
+      tempPassword
+    });
+  })
+);
+
+router.patch(
+  "/users/:userId",
+  requireRole("OWNER"),
+  asyncHandler(async (req, res) => {
+    const schema = z.object({ isActive: z.boolean() });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, "Invalid update");
+
+    const user = await User.findByIdAndUpdate(
+      req.params.userId,
+      { isActive: parsed.data.isActive },
+      { new: true }
+    ).select("_id name email role isActive mustChangePassword");
+
+    if (!user) throw new HttpError(404, "User not found");
+    res.json({ user });
   })
 );
 

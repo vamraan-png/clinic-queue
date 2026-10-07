@@ -27,7 +27,10 @@ const tokenSchema = new mongoose.Schema(
 
 tokenSchema.index({ doctorId: 1, dateKey: 1, tokenNumber: 1 }, { unique: true });
 tokenSchema.index({ doctorId: 1, dateKey: 1, status: 1, tokenNumber: 1 });
-
+tokenSchema.index(
+  { doctorId: 1, dateKey: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: "CALLED" } }
+);
 const Token = mongoose.model("Token", tokenSchema);
 
 module.exports = { Token, TOKEN_STATUS };

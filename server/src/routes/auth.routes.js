@@ -8,6 +8,7 @@ const { User } = require("../models/User.model");
 const { signAuthToken } = require("../lib/jwt");
 const { COOKIE_NAME } = require("../middleware/auth");
 const { env } = require("../config/env");
+const { requireAuth } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -41,8 +42,14 @@ router.post(
     });
 
     res.json({
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
-    });
+  user: {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    mustChangePassword: user.mustChangePassword
+  }
+});
   })
 );
 
@@ -63,15 +70,47 @@ router.get(
 
     try {
       const payload = require("../lib/jwt").verifyAuthToken(token);
-      const user = await User.findById(payload.sub).select("_id name email role isActive");
+      const user = await User.findById(payload.sub).select("_id name email role isActive mustChangePassword")
       if (!user || !user.isActive) return res.json({ user: null });
 
-      return res.json({
-        user: { id: user._id, name: user.name, email: user.email, role: user.role }
-      });
+      res.json({
+  user: {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    mustChangePassword: user.mustChangePassword
+  }
+});
     } catch {
       return res.json({ user: null });
     }
+  })
+);
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(8).max(72),
+  newPassword: z.string().min(10).max(72)
+});
+
+router.post(
+  "/change-password",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const parsed = changePasswordSchema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, "Invalid password data");
+
+    const user = await User.findById(req.user._id);
+    if (!user || !user.isActive) throw new HttpError(401, "Account disabled");
+
+    const ok = await user.verifyPassword(parsed.data.currentPassword);
+    if (!ok) throw new HttpError(401, "Current password is incorrect");
+
+    user.passwordHash = await User.hashPassword(parsed.data.newPassword);
+    user.mustChangePassword = false;
+    await user.save();
+
+    res.json({ ok: true });
   })
 );
 

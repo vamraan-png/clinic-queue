@@ -9,6 +9,7 @@ const path = require("path");
 const { env } = require("./config/env");
 const { apiRouter } = require("./routes");
 const { errorHandler } = require("./middleware/errorHandler");
+const { originCheck } = require("./middleware/originCheck");
 
 function createApp() {
   const app = express();
@@ -43,6 +44,7 @@ function createApp() {
   );
 
   // API routes FIRST (so SPA fallback never breaks /api)
+  app.use(originCheck);
   app.use("/api", apiRouter);
 
   // Serve React build in production (same-origin => no route/API mismatch)
