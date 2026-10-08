@@ -33,6 +33,7 @@ const createDoctorSchema = z.object({
     .regex(/^[A-Za-z0-9]+$/, "Code must be alphanumeric"),
 });
 
+
 router.post(
   "/doctors",
   requireRole("OWNER"),

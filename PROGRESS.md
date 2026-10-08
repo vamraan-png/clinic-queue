@@ -12,8 +12,8 @@
 - [x] Session handling polish
 
 ## Day 3 (Queue UI polish)
-- [ ] Queue redesign (Now Serving, Waiting list, actions)
-- [ ] Better token creation UX
+- [x] Queue redesign (Now Serving, Waiting list, actions)
+- [x] Better token creation UX
 
 ## Day 4 (Staff UI + forced password change)
 - [ ] Staff page UI
