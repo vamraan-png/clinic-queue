@@ -5,6 +5,7 @@ import Typography from "@mui/material/Typography";
 import Button from "@mui/material/Button";
 import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
+import Alert from "@mui/material/Alert";
 
 import { apiFetch } from "../api/http";
 
@@ -28,6 +29,9 @@ export default function AdminLayout({ user, onLogout }) {
           <Button color="inherit" component={RouterLink} to="/admin">
             Doctors
           </Button>
+          <Button color="inherit" component={RouterLink} to="/admin/change-password">
+  Change Password
+</Button>
 
           {user?.role === "OWNER" ? (
             <Button color="inherit" component={RouterLink} to="/admin/users">
@@ -46,6 +50,11 @@ export default function AdminLayout({ user, onLogout }) {
       </AppBar>
 
       <Container sx={{ py: 3 }}>
+        {user?.mustChangePassword ? (
+  <Alert severity="warning" sx={{ mb: 2 }}>
+    You must change your password to continue.
+  </Alert>
+) : null}
         <Outlet />
       </Container>
     </Box>

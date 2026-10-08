@@ -200,12 +200,7 @@ export default function DoctorQueuePage() {
 
   return (
     <Box sx={{ display: "grid", gap: 2 }}>
-      <Stack
-        direction="row"
-        justifyContent="space-between"
-        alignItems="flex-start"
-        gap={2}
-      >
+      <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "flex-start", gap: 2 }}>
         <Box>
           <Button
             component={RouterLink}
@@ -259,17 +254,13 @@ export default function DoctorQueuePage() {
 
         {calledToken ? (
           <Stack
-            direction={{
-              xs: "column",
-              sm: "row",
-            }}
-            justifyContent="space-between"
-            alignItems={{
-              xs: "flex-start",
-              sm: "center",
-            }}
-            gap={2}
-          >
+  direction={{ xs: "column", sm: "row" }}
+  sx={{
+    justifyContent: "space-between",
+    alignItems: { xs: "flex-start", sm: "center" },
+    gap: 2
+  }}
+>
             <Box>
               <Typography
                 variant="h4"
@@ -446,6 +437,7 @@ export default function DoctorQueuePage() {
               <TableCell align="right">
                 Track
               </TableCell>
+              <TableCell align="right">Print</TableCell>
             </TableRow>
           </TableHead>
 
@@ -486,6 +478,18 @@ export default function DoctorQueuePage() {
                     Open
                   </Button>
                 </TableCell>
+                <TableCell align="right">
+  <Button
+    component="a"
+    href={`/admin/print/${t._id}`}
+    target="_blank"
+    rel="noreferrer"
+    size="small"
+    variant="outlined"
+  >
+    Print
+  </Button>
+</TableCell>
               </TableRow>
             ))}
 
@@ -504,7 +508,7 @@ export default function DoctorQueuePage() {
           </TableBody>
         </Table>
       </Paper>
-
+      
       <Snackbar
         open={snack.open}
         autoHideDuration={2200}

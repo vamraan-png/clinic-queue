@@ -13,50 +13,57 @@ import DoctorsPage from "./pages/DoctorsPage";
 import UsersPage from "./pages/UsersPage";
 import RequireOwner from "./components/RequireOwner";
 
+import ChangePasswordPage from "./pages/ChangePasswordPage";
+import ForcePasswordChange from "./components/ForcePasswordChange";
+import PrintTokenPage from "./pages/PrintTokenPage";
+
 export default function App() {
   const [user, setUser] = useState(undefined);
 
+  async function refreshMe() {
+    const data = await apiFetch("/api/auth/me");
+    setUser(data.user);
+  }
+
   useEffect(() => {
-    apiFetch("/api/auth/me")
-      .then((data) => setUser(data.user))
-      .catch(() => setUser(null));
+    refreshMe().catch(() => setUser(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/admin" replace />} />
-
       <Route path="/login" element={<LoginPage onLogin={setUser} />} />
 
-      {/* Public pages */}
+      {/* Public */}
       <Route path="/t/:publicId" element={<TokenStatusPage />} />
       <Route path="/display" element={<DisplayScreenPage />} />
 
-      {/* Admin area */}
-      <Route
-        path="/admin"
-        element={
-          <ProtectedRoute user={user}>
-            <AdminLayout user={user} onLogout={() => setUser(null)} />
-          </ProtectedRoute>
-        }
-      >
-        {/* /admin */}
-        <Route index element={<DoctorsPage user={user} />} />
+      {/* Admin */}
+      <Route path="/admin" element={
+  <ProtectedRoute user={user}>
+    <ForcePasswordChange user={user}>
+      <AdminLayout user={user} onLogout={() => setUser(null)} />
+    </ForcePasswordChange>
+  </ProtectedRoute>
+}>
+  <Route index element={<DoctorsPage user={user} />} />
+  <Route path="doctors/:doctorId" element={<DoctorQueuePage />} />
 
-        {/* /admin/doctors/:doctorId */}
-        <Route path="doctors/:doctorId" element={<DoctorQueuePage />} />
+  <Route
+    path="users"
+    element={
+      <RequireOwner user={user}>
+        <UsersPage />
+      </RequireOwner>
+    }
+  />
 
-        {/* /admin/users (OWNER only) */}
-        <Route
-          path="users"
-          element={
-            <RequireOwner user={user}>
-              <UsersPage />
-            </RequireOwner>
-          }
-        />
-      </Route>
+  <Route path="change-password" element={<ChangePasswordPage onDone={refreshMe} />} />
+
+  {/* ADD THIS */}
+  <Route path="print/:tokenId" element={<PrintTokenPage />} />
+</Route>
 
       <Route path="*" element={<div style={{ padding: 18 }}>Not Found</div>} />
     </Routes>

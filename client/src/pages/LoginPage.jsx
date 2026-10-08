@@ -27,7 +27,8 @@ export default function LoginPage({ onLogin }) {
         body: JSON.stringify({ email, password })
       });
       onLogin(data.user);
-      navigate("/admin", { replace: true });
+      if (data.user?.mustChangePassword) navigate("/admin/change-password", { replace: true });
+else navigate("/admin", { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {

@@ -16,12 +16,12 @@
 - [x] Better token creation UX
 
 ## Day 4 (Staff UI + forced password change)
-- [ ] Staff page UI
-- [ ] Force password change flow UI
+- [x] Force password change flow UI
+- [x] Staff page UI
 
 ## Day 5 (Print token slip)
-- [ ] Print page (80mm)
-- [ ] QR code + print button
+- [x] Print page (80mm)
+- [x] QR code + print button
 
 ## Day 6 (Render deployment + QA)
 - [ ] Render deploy (single service)

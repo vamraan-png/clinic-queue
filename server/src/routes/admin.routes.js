@@ -370,7 +370,38 @@ router.post(
     res.json({ token });
   })
 );
+router.get(
+  "/tokens/:tokenId",
+  requireRole("OWNER", "RECEPTION"),
+  asyncHandler(async (req, res) => {
+    const token = await Token.findById(req.params.tokenId).select(
+      "tokenNumber dateKey publicId patientName status createdAt doctorId"
+    );
 
+    if (!token) throw new HttpError(404, "Token not found");
+
+    const doctor = await Doctor.findById(token.doctorId).select("name code");
+
+    if (!doctor) throw new HttpError(404, "Doctor not found");
+
+    res.json({
+      doctor: {
+        id: doctor._id,
+        name: doctor.name,
+        code: doctor.code,
+      },
+      token: {
+        id: token._id,
+        tokenNumber: token.tokenNumber,
+        dateKey: token.dateKey,
+        publicId: token.publicId,
+        patientName: token.patientName,
+        status: token.status,
+        createdAt: token.createdAt,
+      },
+    });
+  })
+);
 // List all users
 router.get(
   "/users",
