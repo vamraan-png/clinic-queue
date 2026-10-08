@@ -18,14 +18,17 @@ export default function TokenStatusPage() {
 
     const es = new EventSource(`/api/public/tokens/${publicId}/stream`);
 
-    es.addEventListener("token", (event) => {
-      const data = JSON.parse(event.data);
-      setPayload(data);
-    });
+   es.addEventListener("token", (event) => {
+  const data = JSON.parse(event.data);
+  setError("");
+  setPayload(data);
+});
 
-    es.addEventListener("error", () => {
-      setError("Unable to load token status (connection error).");
-    });
+es.addEventListener("error", () => {
+  if (es.readyState === EventSource.CLOSED) {
+    setError("Unable to load token status (connection error).");
+  }
+});
 
     return () => {
       es.close();
