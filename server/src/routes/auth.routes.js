@@ -167,12 +167,9 @@ router.post(
           <p>If you did not request this, you can ignore this email.</p>
         `;
 
-        sendEmail({
-          to: email,
-          subject,
-          text,
-          html
-        }).catch(() => {});
+       sendEmail({ to: email, subject, text, html }).catch((err) => {
+  console.error("[forgot-password email error]", err);
+});
       }
     }
 
