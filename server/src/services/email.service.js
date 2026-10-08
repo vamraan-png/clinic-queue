@@ -18,8 +18,15 @@ async function sendEmail({ to, subject, text, html }) {
   }
 
   if (!isEmailEnabled()) {
-    console.log("[email disabled] SMTP is not configured");
-
+  console.error("[email disabled] SMTP is not configured");
+  console.error("[email config]", {
+    host: Boolean(process.env.SMTP_HOST),
+    port: Boolean(process.env.SMTP_PORT),
+    user: Boolean(process.env.SMTP_USER),
+    pass: Boolean(process.env.SMTP_PASS),
+    from: Boolean(process.env.SMTP_FROM)
+  });
+  
     return {
       ok: false,
       skipped: true,
