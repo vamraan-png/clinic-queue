@@ -24,8 +24,8 @@
 - [x] QR code + print button
 
 ## Day 6 (Render deployment + QA)
-- [ ] Render deploy (single service)
-- [ ] Verify /api + SPA routes + SSE in production
+- [x] Render deploy (single service)
+- [x] Verify /api + SPA routes + SSE in production
 
 ## Day 7 (Buffer + cleanup)
 - [ ] ESLint/Prettier + cleanup
