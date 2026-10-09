@@ -13,17 +13,25 @@ const { User } = require("../models/User.model");
 const { events } = require("../lib/events");
 const mongoose = require("mongoose");
 const { reportsRouter } = require("./reports.routes");
+const { auditRouter } = require("./audit.routes");
+const { logAudit } = require("../services/audit.service");
 
 const router = express.Router();
 
 function emitDoctorQueueUpdated(doctorId, dateKey) {
   events.emit(`doctor:${doctorId}:${dateKey}:queue-updated`);
-  events.emit("display:updated"); // keep TV display in sync too
+  events.emit("display:updated");
 }
 
-// everything under /api/admin should require login
+// All admin routes require authentication.
 router.use(requireAuth);
+
 router.use("/reports", reportsRouter);
+router.use("/audit", auditRouter);
+
+// ------------------------------------------
+// DOCTOR ROUTES
+// ------------------------------------------
 
 const createDoctorSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -35,20 +43,32 @@ const createDoctorSchema = z.object({
     .regex(/^[A-Za-z0-9]+$/, "Code must be alphanumeric"),
 });
 
-
 router.post(
   "/doctors",
   requireRole("OWNER"),
   asyncHandler(async (req, res) => {
     const parsed = createDoctorSchema.safeParse(req.body);
-    if (!parsed.success) throw new HttpError(400, "Invalid doctor data");
 
-    const doc = await Doctor.create({
+    if (!parsed.success) {
+      throw new HttpError(400, "Invalid doctor data");
+    }
+
+    const doctor = await Doctor.create({
       name: parsed.data.name,
       code: parsed.data.code.toUpperCase(),
     });
 
-    res.status(201).json({ doctor: doc });
+    await logAudit(req, {
+      action: "DOCTOR_CREATE",
+      entityType: "DOCTOR",
+      entityId: doctor._id,
+      meta: {
+        name: doctor.name,
+        code: doctor.code,
+      },
+    });
+
+    res.status(201).json({ doctor });
   })
 );
 
@@ -57,6 +77,7 @@ router.get(
   requireRole("OWNER", "RECEPTION"),
   asyncHandler(async (req, res) => {
     const doctors = await Doctor.find().sort({ name: 1 });
+
     res.json({ doctors });
   })
 );
@@ -78,10 +99,16 @@ router.patch(
   requireRole("OWNER"),
   asyncHandler(async (req, res) => {
     const parsed = updateDoctorSchema.safeParse(req.body);
-    if (!parsed.success) throw new HttpError(400, "Invalid update data");
+
+    if (!parsed.success) {
+      throw new HttpError(400, "Invalid update data");
+    }
 
     const update = { ...parsed.data };
-    if (update.code) update.code = update.code.toUpperCase();
+
+    if (update.code) {
+      update.code = update.code.toUpperCase();
+    }
 
     const doctor = await Doctor.findByIdAndUpdate(
       req.params.doctorId,
@@ -89,11 +116,17 @@ router.patch(
       { new: true }
     );
 
-    if (!doctor) throw new HttpError(404, "Doctor not found");
+    if (!doctor) {
+      throw new HttpError(404, "Doctor not found");
+    }
 
     res.json({ doctor });
   })
 );
+
+// ------------------------------------------
+// TOKEN CREATION
+// ------------------------------------------
 
 const createTokenSchema = z.object({
   patientName: z.string().trim().min(2).max(80),
@@ -103,14 +136,15 @@ const createTokenSchema = z.object({
     .max(20)
     .optional()
     .refine(
-      (v) => !v || /^[0-9+ -]{7,20}$/.test(v),
+      (value) => !value || /^[0-9+ -]{7,20}$/.test(value),
       "Invalid phone number"
     ),
 });
 
 function formatDisplayToken(doctorCode, tokenNumber) {
-  const num = String(tokenNumber).padStart(3, "0");
-  return `${doctorCode}-${num}`;
+  const number = String(tokenNumber).padStart(3, "0");
+
+  return `${doctorCode}-${number}`;
 }
 
 router.post(
@@ -118,20 +152,32 @@ router.post(
   requireRole("OWNER", "RECEPTION"),
   asyncHandler(async (req, res) => {
     const parsed = createTokenSchema.safeParse(req.body);
-    if (!parsed.success) throw new HttpError(400, "Invalid patient data");
+
+    if (!parsed.success) {
+      throw new HttpError(400, "Invalid patient data");
+    }
 
     const doctor = await Doctor.findById(req.params.doctorId);
+
     if (!doctor || !doctor.isActive) {
       throw new HttpError(404, "Doctor not available");
     }
 
     const dateKey = getDateKey();
 
-    // Atomic increment per doctor per day
+    // Atomically increment the daily token counter.
     const counter = await Counter.findOneAndUpdate(
-      { doctorId: doctor._id, dateKey },
-      { $inc: { seq: 1 } },
-      { new: true, upsert: true }
+      {
+        doctorId: doctor._id,
+        dateKey,
+      },
+      {
+        $inc: { seq: 1 },
+      },
+      {
+        new: true,
+        upsert: true,
+      }
     );
 
     const token = await Token.create({
@@ -144,7 +190,19 @@ router.post(
       createdBy: req.user._id,
     });
 
-    // Notify doctor queue and TV display
+    await logAudit(req, {
+      action: "TOKEN_CREATE",
+      entityType: "TOKEN",
+      entityId: token._id,
+      doctorId: doctor._id,
+      dateKey,
+      meta: {
+        tokenNumber: token.tokenNumber,
+        publicId: token.publicId,
+      },
+    });
+
+    // Notify the doctor queue and TV display.
     emitDoctorQueueUpdated(doctor._id.toString(), dateKey);
 
     res.status(201).json({
@@ -168,12 +226,19 @@ router.post(
   })
 );
 
+// ------------------------------------------
+// GET DOCTOR QUEUE
+// ------------------------------------------
+
 router.get(
   "/doctors/:doctorId/queue",
   requireRole("OWNER", "RECEPTION"),
   asyncHandler(async (req, res) => {
     const doctor = await Doctor.findById(req.params.doctorId);
-    if (!doctor) throw new HttpError(404, "Doctor not found");
+
+    if (!doctor) {
+      throw new HttpError(404, "Doctor not found");
+    }
 
     const dateKey = getDateKey();
 
@@ -198,23 +263,28 @@ router.get(
   })
 );
 
-// Call-next: if one is already CALLED and not finished, return it
-// (prevents chaos)
+// ------------------------------------------
+// CALL NEXT TOKEN
+// ------------------------------------------
+
 router.post(
   "/doctors/:doctorId/call-next",
   requireRole("OWNER", "RECEPTION"),
   asyncHandler(async (req, res) => {
     const doctor = await Doctor.findById(req.params.doctorId);
-    if (!doctor) throw new HttpError(404, "Doctor not found");
+
+    if (!doctor) {
+      throw new HttpError(404, "Doctor not found");
+    }
 
     const dateKey = getDateKey();
-
     const session = await mongoose.startSession();
 
     try {
       let resultPayload = null;
 
       await session.withTransaction(async () => {
+        // If a token is already being called, return it.
         const alreadyCalled = await Token.findOne({
           doctorId: doctor._id,
           dateKey,
@@ -232,9 +302,11 @@ router.post(
             ),
             alreadyCalled: true,
           };
+
           return;
         }
 
+        // Atomically select the next waiting token.
         const nextToken = await Token.findOneAndUpdate(
           {
             doctorId: doctor._id,
@@ -268,15 +340,12 @@ router.post(
         };
       });
 
-      // Emit events OUTSIDE transaction
-      // (better behavior)
+      // Emit events after the transaction completes.
       if (resultPayload?.token?.publicId) {
         events.emit(
           `token:${resultPayload.token.publicId}:updated`
         );
 
-        // Only emit queue-updated when status actually changed
-        // to CALLED.
         if (!resultPayload.alreadyCalled) {
           emitDoctorQueueUpdated(
             doctor._id.toString(),
@@ -285,14 +354,33 @@ router.post(
         }
       }
 
+      // Audit only when a new token is called.
+      if (resultPayload && !resultPayload.alreadyCalled) {
+        await logAudit(req, {
+          action: "TOKEN_CALLED",
+          entityType: "TOKEN",
+          entityId: resultPayload.token._id,
+          doctorId: doctor._id,
+          dateKey,
+          meta: {
+            tokenNumber: resultPayload.token.tokenNumber,
+          },
+        });
+      }
+
       res.json(resultPayload);
     } finally {
-      session.endSession();
+      await session.endSession();
     }
   })
 );
 
+// ------------------------------------------
+// SERVE, SKIP AND CANCEL TOKENS
+// ------------------------------------------
+
 async function updateTokenStatusOrFail(
+  req,
   tokenId,
   allowedFromStatuses,
   newStatus,
@@ -316,10 +404,28 @@ async function updateTokenStatusOrFail(
 
   await token.save();
 
-  // Keep existing per-token event
+  const actionMap = {
+    SERVED: "TOKEN_SERVED",
+    SKIPPED: "TOKEN_SKIPPED",
+    CANCELLED: "TOKEN_CANCELLED",
+  };
+
+  await logAudit(req, {
+    action: actionMap[newStatus] || "TOKEN_STATUS_CHANGE",
+    entityType: "TOKEN",
+    entityId: token._id,
+    doctorId: token.doctorId,
+    dateKey: token.dateKey,
+    meta: {
+      tokenNumber: token.tokenNumber,
+      to: newStatus,
+    },
+  });
+
+  // Notify the public token status page.
   events.emit(`token:${token.publicId}:updated`);
 
-  // Notify doctor queue + TV display
+  // Notify the doctor queue and TV display.
   emitDoctorQueueUpdated(
     token.doctorId.toString(),
     token.dateKey
@@ -333,6 +439,7 @@ router.post(
   requireRole("OWNER", "RECEPTION"),
   asyncHandler(async (req, res) => {
     const token = await updateTokenStatusOrFail(
+      req,
       req.params.tokenId,
       ["CALLED"],
       "SERVED",
@@ -348,6 +455,7 @@ router.post(
   requireRole("OWNER", "RECEPTION"),
   asyncHandler(async (req, res) => {
     const token = await updateTokenStatusOrFail(
+      req,
       req.params.tokenId,
       ["CALLED"],
       "SKIPPED",
@@ -363,6 +471,7 @@ router.post(
   requireRole("OWNER", "RECEPTION"),
   asyncHandler(async (req, res) => {
     const token = await updateTokenStatusOrFail(
+      req,
       req.params.tokenId,
       ["WAITING", "CALLED"],
       "CANCELLED",
@@ -372,19 +481,32 @@ router.post(
     res.json({ token });
   })
 );
+
+// ------------------------------------------
+// GET TOKEN DETAILS
+// ------------------------------------------
+
 router.get(
   "/tokens/:tokenId",
   requireRole("OWNER", "RECEPTION"),
   asyncHandler(async (req, res) => {
-    const token = await Token.findById(req.params.tokenId).select(
+    const token = await Token.findById(
+      req.params.tokenId
+    ).select(
       "tokenNumber dateKey publicId patientName status createdAt doctorId"
     );
 
-    if (!token) throw new HttpError(404, "Token not found");
+    if (!token) {
+      throw new HttpError(404, "Token not found");
+    }
 
-    const doctor = await Doctor.findById(token.doctorId).select("name code");
+    const doctor = await Doctor.findById(
+      token.doctorId
+    ).select("name code");
 
-    if (!doctor) throw new HttpError(404, "Doctor not found");
+    if (!doctor) {
+      throw new HttpError(404, "Doctor not found");
+    }
 
     res.json({
       doctor: {
@@ -404,7 +526,11 @@ router.get(
     });
   })
 );
-// List all users
+
+// ------------------------------------------
+// USER MANAGEMENT
+// ------------------------------------------
+
 router.get(
   "/users",
   requireRole("OWNER"),
@@ -428,7 +554,8 @@ function generateTempPassword() {
   return `Tmp#${nanoid(10)}`;
 }
 
-// Create RECEPTION user (returns temp password once)
+// Create receptionist account.
+// The temporary password is returned only when the account is created.
 router.post(
   "/users/reception",
   requireRole("OWNER"),
@@ -471,7 +598,7 @@ router.post(
   })
 );
 
-// Enable/disable user
+// Enable or disable a user.
 router.patch(
   "/users/:userId",
   requireRole("OWNER"),
@@ -505,18 +632,27 @@ router.patch(
     res.json({ user });
   })
 );
+
+// ------------------------------------------
+// LIVE QUEUE STREAM
+// ------------------------------------------
+
 router.get(
   "/doctors/:doctorId/queue/stream",
   requireRole("OWNER", "RECEPTION"),
   asyncHandler(async (req, res) => {
     const doctor = await Doctor.findById(req.params.doctorId);
-    if (!doctor) throw new HttpError(404, "Doctor not found");
+
+    if (!doctor) {
+      throw new HttpError(404, "Doctor not found");
+    }
 
     const dateKey = getDateKey();
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
+
     res.flushHeaders?.();
 
     const send = (event, data) => {
@@ -525,33 +661,43 @@ router.get(
     };
 
     async function buildPayload() {
-      const tokens = await Token.find({ doctorId: doctor._id, dateKey })
+      const tokens = await Token.find({
+        doctorId: doctor._id,
+        dateKey,
+      })
         .sort({ tokenNumber: 1 })
-        .select("tokenNumber patientName patientPhone status publicId createdAt calledAt servedAt skippedAt cancelledAt");
+        .select(
+          "tokenNumber patientName patientPhone status publicId createdAt calledAt servedAt skippedAt cancelledAt"
+        );
 
       return {
-        doctor: { id: doctor._id, name: doctor.name, code: doctor.code },
+        doctor: {
+          id: doctor._id,
+          name: doctor.name,
+          code: doctor.code,
+        },
         dateKey,
-        tokens
+        tokens,
       };
     }
 
-    // initial payload
+    // Send the initial queue immediately.
     send("queue", await buildPayload());
 
-    // keep alive
+    // Send periodic keep-alive messages.
     const pingTimer = setInterval(() => {
-      res.write(`event: ping\n`);
-      res.write(`data: {}\n\n`);
+      res.write("event: ping\n");
+      res.write("data: {}\n\n");
     }, 25000);
 
-    const eventName = `doctor:${doctor._id.toString()}:${dateKey}:queue-updated`;
+    const eventName =
+      `doctor:${doctor._id.toString()}:${dateKey}:queue-updated`;
 
     const handler = async () => {
       try {
         send("queue", await buildPayload());
       } catch {
-        // keep stream alive
+        // Keep the stream alive if a queue refresh fails.
       }
     };
 
