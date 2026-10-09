@@ -38,6 +38,11 @@ export default function AdminLayout({ user, onLogout }) {
               Staff
             </Button>
           ) : null}
+          {user?.role === "OWNER" ? (
+  <Button color="inherit" component={RouterLink} to="/admin/reports">
+    Reports
+  </Button>
+) : null}
 
           <Box sx={{ mx: 2, opacity: 0.9 }}>
             {user?.name} ({user?.role})

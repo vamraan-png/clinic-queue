@@ -12,6 +12,7 @@ const { getDateKey } = require("../lib/dateKey");
 const { User } = require("../models/User.model");
 const { events } = require("../lib/events");
 const mongoose = require("mongoose");
+const { reportsRouter } = require("./reports.routes");
 
 const router = express.Router();
 
@@ -22,6 +23,7 @@ function emitDoctorQueueUpdated(doctorId, dateKey) {
 
 // everything under /api/admin should require login
 router.use(requireAuth);
+router.use("/reports", reportsRouter);
 
 const createDoctorSchema = z.object({
   name: z.string().trim().min(2).max(80),
