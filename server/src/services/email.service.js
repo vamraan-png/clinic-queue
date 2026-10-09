@@ -1,11 +1,7 @@
+const { Resend } = require("resend");
+
 function isEmailEnabled() {
-  return Boolean(
-    process.env.SMTP_HOST &&
-      process.env.SMTP_PORT &&
-      process.env.SMTP_USER &&
-      process.env.SMTP_PASS &&
-      process.env.SMTP_FROM
-  );
+  return Boolean(process.env.RESEND_API_KEY && process.env.SMTP_FROM);
 }
 
 async function sendEmail({ to, subject, text, html }) {
@@ -18,15 +14,8 @@ async function sendEmail({ to, subject, text, html }) {
   }
 
   if (!isEmailEnabled()) {
-  console.error("[email disabled] SMTP is not configured");
-  console.error("[email config]", {
-    host: Boolean(process.env.SMTP_HOST),
-    port: Boolean(process.env.SMTP_PORT),
-    user: Boolean(process.env.SMTP_USER),
-    pass: Boolean(process.env.SMTP_PASS),
-    from: Boolean(process.env.SMTP_FROM)
-  });
-  
+    console.error("[email error] RESEND_API_KEY or SMTP_FROM is missing");
+
     return {
       ok: false,
       skipped: true,
@@ -34,31 +23,26 @@ async function sendEmail({ to, subject, text, html }) {
     };
   }
 
-  const nodemailer = require("nodemailer");
+  const resend = new Resend(process.env.RESEND_API_KEY);
 
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT),
-    secure: Number(process.env.SMTP_PORT) === 465,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
-    }
-  });
-
-  const info = await transporter.sendMail({
+  const result = await resend.emails.send({
     from: process.env.SMTP_FROM,
-    to,
+    to: [to],
     subject,
     text,
     html
   });
 
-  console.log("[email sent]", info.messageId);
+  if (result.error) {
+    console.error("[email sending failed]", result.error.message);
+    throw new Error(result.error.message);
+  }
+
+  console.log("[email sent]", result.data?.id);
 
   return {
     ok: true,
-    messageId: info.messageId
+    messageId: result.data?.id
   };
 }
 
