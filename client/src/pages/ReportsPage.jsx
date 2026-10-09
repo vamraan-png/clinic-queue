@@ -11,6 +11,7 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import TableBody from "@mui/material/TableBody";
+import Button from "@mui/material/Button";
 
 function todayLocalDateKey() {
   // YYYY-MM-DD (browser local); backend still uses clinic timezone if dateKey not provided
@@ -62,6 +63,14 @@ export default function ReportsPage() {
           InputLabelProps={{ shrink: true }}
           sx={{ width: 220 }}
         />
+
+        <Button
+  variant="outlined"
+  component="a"
+  href={`/api/admin/reports/daily.csv?dateKey=${encodeURIComponent(dateKey)}`}
+>
+  Download CSV
+</Button>
 
         <Typography sx={{ color: "text.secondary" }}>
           {data ? totalsLine : "Loading..."}
