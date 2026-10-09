@@ -1,4 +1,5 @@
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const { z } = require("zod");
 const { events } = require("../lib/events");
 const { sendSms } = require("../services/sms.service");
@@ -124,12 +125,22 @@ router.post(
   })
 );
 
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 5, // Maximum 5 requests per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many password reset requests. Please try again in 15 minutes."
+  }
+});
+
 const forgotSchema = z.object({
   email: z.string().email().max(120)
 });
-
 router.post(
   "/forgot-password",
+  forgotPasswordLimiter,
   asyncHandler(async (req, res) => {
     const parsed = forgotSchema.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, "Invalid email");
