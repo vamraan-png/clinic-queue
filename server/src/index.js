@@ -2,10 +2,12 @@ const mongoose = require("mongoose");
 const { env } = require("./config/env");
 const { createApp } = require("./app");
 const { seedOwnerFromEnv } = require("./config/seedOwner");
+const { AuditEvent } = require("./models/AuditEvent.model");
 
 async function main() {
   await mongoose.connect(env.MONGODB_URI);
   await seedOwnerFromEnv();
+  await AuditEvent.syncIndexes();
 
   const app = createApp();
 
