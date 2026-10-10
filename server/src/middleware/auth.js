@@ -15,8 +15,15 @@ async function requireAuth(req, res, next) {
     return next(new HttpError(401, "Invalid session"));
   }
 
-  const user = await User.findById(payload.sub).select("_id name email role isActive");
+  const user = await User.findById(payload.sub).select(
+  "_id name email role isActive tokenVersion"
+);
   if (!user || !user.isActive) return next(new HttpError(401, "Account disabled"));
+
+  if ((payload.tokenVersion ?? 0) !== (user.tokenVersion ?? 0)) {
+  return next(new HttpError(401, "Session expired. Please log in again."));
+}
+
 
   req.user = user;
   next();

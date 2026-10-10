@@ -13,7 +13,10 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, trim: true, maxlength: 20 },
     passwordResetTokenHash: { type: String },
 passwordResetExpiresAt: { type: Date },
-mustChangePassword: { type: Boolean, default: false }
+mustChangePassword: { type: Boolean, default: false },
+
+// Increment this to invalidate previously issued JWT sessions.
+tokenVersion: { type: Number, default: 0 }
     
   },
   { timestamps: true }

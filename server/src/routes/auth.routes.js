@@ -64,9 +64,10 @@ router.post(
     }
 
     const token = signAuthToken({
-      sub: user._id.toString(),
-      role: user.role,
-    });
+  sub: user._id.toString(),
+  role: user.role,
+  tokenVersion: user.tokenVersion ?? 0,
+});
 
     res.cookie(COOKIE_NAME, token, {
       httpOnly: true,
@@ -121,14 +122,19 @@ router.get(
       const payload = verifyAuthToken(token);
 
       const user = await User.findById(payload.sub).select(
-        "_id name email role isActive mustChangePassword"
+        "_id name email role isActive mustChangePassword tokenVersion"
       );
 
       if (!user || !user.isActive) {
         return res.json({ user: null });
       }
 
-      res.json({
+      // Reject sessions created before a password change or reset.
+      if ((payload.tokenVersion ?? 0) !== (user.tokenVersion ?? 0)) {
+        return res.json({ user: null });
+      }
+
+      return res.json({
         user: {
           id: user._id,
           name: user.name,
@@ -183,11 +189,15 @@ router.post(
       parsed.data.newPassword
     );
 
-    user.mustChangePassword = false;
+  user.mustChangePassword = false;
+user.tokenVersion = (user.tokenVersion ?? 0) + 1;
 
-    await user.save();
+await user.save();
 
-    res.json({ ok: true });
+// Invalidate the current browser's old JWT too.
+res.clearCookie(COOKIE_NAME, { path: "/" });
+
+res.json({ ok: true });
   })
 );
 
@@ -303,14 +313,15 @@ router.post(
     );
 
     user.mustChangePassword = false;
+user.tokenVersion = (user.tokenVersion ?? 0) + 1;
 
-    // Make the reset token single-use.
-    user.passwordResetTokenHash = undefined;
-    user.passwordResetExpiresAt = undefined;
+// Make the reset token single-use.
+user.passwordResetTokenHash = undefined;
+user.passwordResetExpiresAt = undefined;
 
-    await user.save();
+await user.save();
 
-    res.json({ ok: true });
+res.json({ ok: true });
   })
 );
 

@@ -7,6 +7,34 @@ const { events } = require("../lib/events");
 const { getDateKey } = require("../lib/dateKey");
 
 const router = express.Router();
+// Track active public SSE connections in this server process.
+const MAX_PUBLIC_SSE_CONNECTIONS = 100;
+let activePublicSSEConnections = 0;
+
+function openPublicSSE(req, res) {
+  if (activePublicSSEConnections >= MAX_PUBLIC_SSE_CONNECTIONS) {
+    res.set("Retry-After", "30");
+    res.status(503).json({
+      error: "Live updates are busy. Please try again shortly."
+    });
+    return false;
+  }
+
+  activePublicSSEConnections++;
+
+  let released = false;
+
+  const release = () => {
+    if (released) return;
+    released = true;
+    activePublicSSEConnections--;
+  };
+
+  res.on("close", release);
+  res.on("finish", release);
+
+  return true;
+}
 
 async function buildPublicTokenPayload(publicId) {
   const token = await Token.findOne({ publicId }).select(
@@ -58,6 +86,7 @@ router.get(
 router.get(
   "/tokens/:publicId/stream",
   asyncHandler(async (req, res) => {
+    if (!openPublicSSE(req, res)) return;
     const publicId = req.params.publicId;
 
     res.setHeader("Content-Type", "text/event-stream");
@@ -74,11 +103,12 @@ router.get(
 
     // Send initial state immediately
     try {
-      const payload = await buildPublicTokenPayload(publicId);
-      send("token", payload);
-    } catch (e) {
-      send("error", { message: "Token not found" });
-    }
+  const payload = await buildPublicTokenPayload(publicId);
+  send("token", payload);
+} catch (e) {
+  send("error", { message: "Token not found" });
+  return res.end();
+}
 
     // Keep-alive ping (Render/proxies can close idle connections)
     const pingTimer = setInterval(() => {
@@ -164,6 +194,7 @@ router.get(
 router.get(
   "/display/stream",
   asyncHandler(async (req, res) => {
+    if (!openPublicSSE(req, res)) return;
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
