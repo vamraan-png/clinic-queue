@@ -1,11 +1,11 @@
 const express = require("express");
 const { z } = require("zod");
-const { requireRole } = require("../middleware/auth");
+const { requireAuth, requireRole } = require("../middleware/auth");
 const { asyncHandler } = require("../lib/asyncHandler");
 const { AuditEvent } = require("../models/AuditEvent.model");
 
 const router = express.Router();
-router.use(requireRole("OWNER"));
+router.use(requireAuth, requireRole("OWNER"));
 
 const querySchema = z.object({
   dateKey: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),

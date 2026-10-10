@@ -19,6 +19,7 @@ import PrintTokenPage from "./pages/PrintTokenPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import ReportsPage from "./pages/ReportsPage";
+import AuditLogsPage from "./pages/AuditLogsPage";
 
 function HomeRedirect({ user }) {
   if (user === undefined) {
@@ -92,6 +93,16 @@ export default function App() {
           element={
             <RequireOwner user={user}>
               <ReportsPage />
+            </RequireOwner>
+          }
+        />
+
+        {/* Audit Logs — owner only */}
+        <Route
+          path="audit-logs"
+          element={
+            <RequireOwner user={user}>
+              <AuditLogsPage />
             </RequireOwner>
           }
         />
